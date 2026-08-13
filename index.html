@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect Four</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,400..800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --void:#0B0E1A;
+  --panel:#131A2D;
+  --slab:#1C2745;
+  --hole:#070A12;
+  --line:#28324F;
+  --human:#F5A524;
+  --bot:#2DD4BF;
+  --ink:#E6E9F5;
+  --dim:#79839F;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--void);
+  color:var(--ink);
+  font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:13px;
+  display:flex;
+  justify-content:center;
+  padding:28px 18px 48px;
+  background-image:
+    linear-gradient(rgba(40,50,79,.16) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(40,50,79,.16) 1px,transparent 1px);
+  background-size:52px 52px;
+}
+.shell{width:100%;max-width:860px}
+
+header{
+  display:flex;align-items:baseline;justify-content:space-between;
+  gap:16px;flex-wrap:wrap;
+  padding-bottom:14px;border-bottom:1px solid var(--line);
+}
+h1{
+  font-family:Archivo,system-ui,sans-serif;
+  font-variation-settings:'wdth' 118,'wght' 760;
+  font-size:clamp(26px,5.5vw,40px);
+  letter-spacing:-.02em;line-height:.94;text-transform:uppercase;
+}
+h1 em{font-style:normal;color:var(--bot)}
+.engine-tag{
+  color:var(--dim);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  text-align:right;line-height:1.7;
+}
+.engine-tag b{color:var(--ink);font-weight:500}
+
+.stage{display:grid;grid-template-columns:56px 1fr;gap:18px;margin-top:22px;align-items:start}
+
+.rail{position:sticky;top:20px}
+.rail-label{
+  font-size:9px;letter-spacing:.16em;color:var(--dim);
+  text-transform:uppercase;text-align:center;margin-bottom:8px;
+}
+.evalbar{
+  position:relative;height:340px;border-radius:8px;overflow:hidden;
+  background:var(--panel);border:1px solid var(--line);
+}
+.evalfill{
+  position:absolute;left:0;right:0;
+  transition:top .45s cubic-bezier(.4,0,.2,1),height .45s cubic-bezier(.4,0,.2,1);
+}
+.evalfill.bot{background:linear-gradient(180deg,var(--bot),rgba(45,212,191,.35))}
+.evalfill.human{background:linear-gradient(0deg,var(--human),rgba(245,165,36,.35))}
+.evalmid{position:absolute;left:0;right:0;top:50%;height:1px;background:var(--line)}
+.evalnum{
+  margin-top:8px;text-align:center;font-size:12px;font-weight:600;
+  font-variant-numeric:tabular-nums;
+}
+
+.scores{
+  display:grid;grid-template-columns:repeat(7,1fr);gap:6px;
+  padding:0 8px;margin-bottom:6px;
+}
+.sc{display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:52px;gap:4px}
+.sc .bar{
+  width:100%;border-radius:3px 3px 1px 1px;
+  background:var(--line);height:2px;
+  transition:height .4s cubic-bezier(.4,0,.2,1),background .3s;
+}
+.sc.best .bar{background:var(--bot)}
+.sc.dead .bar{background:#3A2530}
+.sc .v{font-size:9px;color:var(--dim);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.sc.best .v{color:var(--bot)}
+
+.lane{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;padding:0 8px;height:16px}
+.caret{
+  justify-self:center;width:0;height:0;opacity:0;
+  border-left:6px solid transparent;border-right:6px solid transparent;
+  border-top:8px solid var(--human);
+  transition:opacity .15s,transform .15s;transform:translateY(-3px);
+}
+.caret.on{opacity:1;transform:translateY(0)}
+
+.board{
+  background:var(--slab);border-radius:14px;padding:8px;
+  display:grid;grid-template-columns:repeat(7,1fr);gap:6px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 18px 40px -18px rgba(0,0,0,.9);
+  border:1px solid #26325A;
+}
+.col{display:grid;grid-template-rows:repeat(6,1fr);gap:6px;cursor:pointer;border-radius:8px}
+.col.locked{cursor:not-allowed}
+.col:not(.locked):hover .hole{background:#0B1020}
+.hole{
+  position:relative;aspect-ratio:1;border-radius:50%;
+  background:var(--hole);
+  box-shadow:inset 0 2px 5px rgba(0,0,0,.85),inset 0 -1px 0 rgba(255,255,255,.05);
+  transition:background .15s;
+}
+.disc{
+  position:absolute;inset:6%;border-radius:50%;
+  animation:drop .34s cubic-bezier(.3,.85,.4,1.06);
+  will-change:transform;
+}
+.disc.p1{background:radial-gradient(circle at 32% 28%,#FFD37A,var(--human) 58%,#B4700B);box-shadow:0 0 0 1px rgba(0,0,0,.35),0 2px 6px rgba(0,0,0,.5)}
+.disc.p2{background:radial-gradient(circle at 32% 28%,#8DF3E6,var(--bot) 58%,#0B7F72);box-shadow:0 0 0 1px rgba(0,0,0,.35),0 2px 6px rgba(0,0,0,.5)}
+@keyframes drop{
+  0%{transform:translateY(calc(-1 * var(--fall,300px)))}
+  78%{transform:translateY(0)}
+  88%{transform:translateY(-7%)}
+  100%{transform:translateY(0)}
+}
+.decided .disc{opacity:.28;transition:opacity .4s}
+.decided .disc.win{opacity:1}
+.decided .disc.win::after{
+  content:'';position:absolute;inset:-4px;border-radius:50%;
+  border:2px solid rgba(255,255,255,.9);
+  animation:ring 1.5s ease-in-out .3s infinite;
+}
+@keyframes ring{0%,100%{opacity:.9;transform:scale(1)}50%{opacity:.1;transform:scale(1.14)}}
+
+.status{
+  margin-top:14px;display:flex;align-items:center;gap:9px;
+  font-size:13px;min-height:20px;
+}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--human);flex:none}
+.dot.bot{background:var(--bot)}
+.dot.think{animation:blink .8s ease-in-out infinite}
+.dot.over{background:var(--dim)}
+@keyframes blink{50%{opacity:.2}}
+
+.telemetry{
+  margin-top:14px;border:1px solid var(--line);border-radius:10px;
+  background:var(--panel);display:grid;grid-template-columns:repeat(4,1fr);
+}
+.tcell{padding:10px 12px;border-right:1px solid var(--line)}
+.tcell:last-child{border-right:0}
+.tcell .k{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.tcell .v{font-size:15px;margin-top:3px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+
+.controls{margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.seg{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--panel)}
+.seg button{
+  background:none;border:0;color:var(--dim);cursor:pointer;
+  padding:8px 12px;font:inherit;font-size:11px;letter-spacing:.06em;
+  text-transform:uppercase;border-right:1px solid var(--line);transition:.15s;
+}
+.seg button:last-child{border-right:0}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--bot);color:#04201D;font-weight:600}
+.btn{
+  background:var(--panel);border:1px solid var(--line);color:var(--ink);
+  padding:8px 14px;border-radius:9px;cursor:pointer;font:inherit;font-size:11px;
+  letter-spacing:.06em;text-transform:uppercase;transition:.15s;
+}
+.btn:hover{border-color:var(--bot);color:var(--bot)}
+.btn:disabled{opacity:.35;cursor:not-allowed;border-color:var(--line);color:var(--dim)}
+:focus-visible{outline:2px solid var(--bot);outline-offset:2px}
+.hint{margin-top:16px;color:var(--dim);font-size:11px;line-height:1.7}
+
+@media (max-width:640px){
+  .stage{grid-template-columns:1fr}
+  .rail{position:static;display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center}
+  .rail-label{margin:0}
+  .evalbar{height:10px;width:100%}
+  .evalfill{top:0!important;bottom:0;height:100%!important;left:auto;right:auto}
+  .evalfill.bot{left:0}
+  .evalfill.human{right:0}
+  .evalmid{top:0;bottom:0;left:50%;right:auto;width:1px;height:auto}
+  .evalnum{margin:0}
+  .telemetry{grid-template-columns:repeat(2,1fr)}
+  .tcell:nth-child(2){border-right:0}
+  .tcell:nth-child(-n+2){border-bottom:1px solid var(--line)}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header>
+    <h1>Connect<br>Four <em>Engine</em></h1>
+    <div class="engine-tag">
+      negamax · <b>alpha-beta</b><br>
+      iterative deepening · <b>transposition table</b>
+    </div>
+  </header>
+
+  <div class="stage">
+    <div class="rail">
+      <div class="rail-label">Eval</div>
+      <div class="evalbar">
+        <div class="evalfill" id="evalfill"></div>
+        <div class="evalmid"></div>
+      </div>
+      <div class="evalnum" id="evalnum">0</div>
+    </div>
+
+    <div>
+      <div class="scores" id="scores"></div>
+      <div class="lane" id="lane"></div>
+      <div class="board" id="board"></div>
+
+      <div class="status">
+        <span class="dot" id="dot"></span>
+        <span id="statusText">Your move. Drop a disc.</span>
+      </div>
+
+      <div class="telemetry">
+        <div class="tcell"><div class="k">Depth</div><div class="v" id="tDepth">—</div></div>
+        <div class="tcell"><div class="k">Nodes</div><div class="v" id="tNodes">—</div></div>
+        <div class="tcell"><div class="k">Time</div><div class="v" id="tTime">—</div></div>
+        <div class="tcell"><div class="k">Nodes/sec</div><div class="v" id="tNps">—</div></div>
+      </div>
+
+      <div class="controls">
+        <div class="seg" id="diff" role="group" aria-label="Engine strength"></div>
+        <button class="btn" id="newGame">New game</button>
+        <button class="btn" id="undo">Undo</button>
+        <button class="btn" id="swap">Engine starts</button>
+      </div>
+
+      <p class="hint">
+        Click a column or press <b>1</b> to <b>7</b> to drop. The strip above the board shows the
+        engine's score for every legal column after its last search. Taller and teal is better for
+        the engine.
+      </p>
+    </div>
+  </div>
+</div>
+
+<script src="engine.js"></script>
+<script>
+const LEVELS = [
+  { id: 'rookie',   name: 'Rookie',   depth: 2,  time: 120,  noise: 0.35 },
+  { id: 'solid',    name: 'Solid',    depth: 6,  time: 500,  noise: 0.06 },
+  { id: 'sharp',    name: 'Sharp',    depth: 10, time: 1400, noise: 0 },
+  { id: 'ruthless', name: 'Ruthless', depth: 16, time: 3000, noise: 0 }
+];
+
+const el = id => document.getElementById(id);
+const boardEl = el('board');
+const scoresEl = el('scores');
+const laneEl = el('lane');
+
+let game = new Game();
+let level = LEVELS[2];
+let engineFirst = false;
+let busy = false;
+let over = null;
+let lastScores = null;
+let lastEval = 0;
+
+for (let c = 0; c < COLS; c++) {
+  const sc = document.createElement('div');
+  sc.className = 'sc';
+  sc.innerHTML = '<div class="v">—</div><div class="bar"></div>';
+  scoresEl.appendChild(sc);
+
+  const caret = document.createElement('div');
+  caret.className = 'caret';
+  laneEl.appendChild(caret);
+
+  const col = document.createElement('div');
+  col.className = 'col';
+  col.dataset.col = c;
+  col.setAttribute('role', 'button');
+  col.setAttribute('aria-label', `Drop in column ${c + 1}`);
+  col.tabIndex = 0;
+  for (let r = 0; r < ROWS; r++) {
+    const hole = document.createElement('div');
+    hole.className = 'hole';
+    hole.dataset.col = c;
+    hole.dataset.row = ROWS - 1 - r;
+    col.appendChild(hole);
+  }
+  col.addEventListener('click', () => tryDrop(c));
+  col.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      tryDrop(c);
+    }
+  });
+  col.addEventListener('mouseenter', () => setCaret(c));
+  col.addEventListener('mouseleave', () => setCaret(-1));
+  col.addEventListener('focus', () => setCaret(c));
+  col.addEventListener('blur', () => setCaret(-1));
+  boardEl.appendChild(col);
+}
+
+LEVELS.forEach(lv => {
+  const b = document.createElement('button');
+  b.textContent = lv.name;
+  b.dataset.id = lv.id;
+  b.setAttribute('aria-pressed', lv.id === level.id);
+  b.addEventListener('click', () => {
+    level = lv;
+    [...el('diff').children].forEach(x => x.setAttribute('aria-pressed', x.dataset.id === lv.id));
+  });
+  el('diff').appendChild(b);
+});
+
+function setCaret(c) {
+  [...laneEl.children].forEach((n, i) => {
+    n.classList.toggle('on', i === c && !busy && !over && game.canPlay(c) && game.turn === HUMAN);
+  });
+}
+
+function render(animateCell) {
+  const holes = boardEl.querySelectorAll('.hole');
+  const winKeys = new Set((over && over.line ? over.line : []).map(([c, r]) => `${c},${r}`));
+
+  holes.forEach(h => {
+    const c = +h.dataset.col;
+    const r = +h.dataset.row;
+    const v = game.at(c, r);
+    const existing = h.firstChild;
+
+    if (v === 0) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (existing && existing.dataset.v == v) {
+      existing.classList.toggle('win', winKeys.has(`${c},${r}`));
+      return;
+    }
+    if (existing) existing.remove();
+
+    const d = document.createElement('div');
+    d.className = `disc ${v === HUMAN ? 'p1' : 'p2'}` + (winKeys.has(`${c},${r}`) ? ' win' : '');
+    d.dataset.v = v;
+    if (animateCell && animateCell[0] === c && animateCell[1] === r) {
+      d.style.setProperty('--fall', `${(ROWS - r) * 58}px`);
+    } else {
+      d.style.animation = 'none';
+    }
+    h.appendChild(d);
+  });
+
+  boardEl.classList.toggle('decided', !!over);
+  [...boardEl.children].forEach((col, c) => {
+    col.classList.toggle('locked', busy || !!over || !game.canPlay(c));
+  });
+
+  renderScores();
+  renderEval();
+  el('undo').disabled = busy || game.moves.length < 1;
+  el('swap').disabled = game.moves.length > 0 || busy;
+}
+
+function renderScores() {
+  const cells = [...scoresEl.children];
+  if (!lastScores) {
+    cells.forEach(s => {
+      s.className = 'sc';
+      s.querySelector('.bar').style.height = '2px';
+      s.querySelector('.v').textContent = '—';
+    });
+    return;
+  }
+
+  const vals = Object.values(lastScores);
+  const max = Math.max(...vals);
+  const min = Math.min(...vals);
+  const span = Math.max(1, max - min);
+
+  cells.forEach((s, c) => {
+    const v = lastScores[c];
+    if (v === undefined) {
+      s.className = 'sc';
+      s.querySelector('.bar').style.height = '2px';
+      s.querySelector('.v').textContent = '·';
+      return;
+    }
+    s.className = 'sc' + (v === max ? ' best' : v < -WIN_SCORE + 200 ? ' dead' : '');
+    s.querySelector('.bar').style.height = `${4 + ((v - min) / span) * 30}px`;
+    s.querySelector('.v').textContent = fmtScore(v);
+  });
+}
+
+function fmtScore(v) {
+  if (v > WIN_SCORE - 100) return `+M${Math.max(1, Math.round((WIN_SCORE - v) / 2))}`;
+  if (v < -WIN_SCORE + 100) return `-M${Math.max(1, Math.round((WIN_SCORE + v) / 2))}`;
+  return (v > 0 ? '+' : '') + v;
+}
+
+function renderEval() {
+  const t = Math.tanh(lastEval / 220);
+  const fill = el('evalfill');
+  const pct = Math.abs(t) * 50;
+  if (t >= 0) {
+    fill.className = 'evalfill bot';
+    fill.style.top = `${50 - pct}%`;
+  } else {
+    fill.className = 'evalfill human';
+    fill.style.top = '50%';
+  }
+  fill.style.height = `${pct}%`;
+  el('evalnum').textContent = fmtScore(lastEval);
+  el('evalnum').style.color = t >= 0 ? 'var(--bot)' : 'var(--human)';
+}
+
+function setStatus(text, kind) {
+  el('statusText').textContent = text;
+  el('dot').className = 'dot' + (kind ? ' ' + kind : '');
+}
+
+function setTelemetry(res) {
+  el('tDepth').textContent = res.depth;
+  el('tNodes').textContent = res.nodes.toLocaleString();
+  el('tTime').textContent = `${Math.round(res.ms)} ms`;
+  el('tNps').textContent = Math.round(res.nodes / (res.ms / 1000)).toLocaleString();
+}
+
+function tryDrop(c) {
+  if (busy || over || game.turn !== HUMAN || !game.canPlay(c)) return;
+
+  const r = game.play(c);
+  const line = lineAt(game, c, r, HUMAN);
+  if (line) return finish('human', line, [c, r]);
+  if (game.full()) return finish('draw', [], [c, r]);
+
+  busy = true;
+  setCaret(-1);
+  render([c, r]);
+  setStatus('Engine is thinking...', 'bot think');
+  requestAnimationFrame(() => setTimeout(engineMove, 30));
+}
+
+function engineMove() {
+  const res = search(game, level);
+  let move = res.move;
+
+  if (level.noise && Math.random() < level.noise) {
+    const legal = game.legal();
+    move = legal[Math.floor(Math.random() * legal.length)];
+  }
+
+  lastScores = res.scores;
+  lastEval = res.scores[move] !== undefined ? res.scores[move] : res.score;
+  setTelemetry(res);
+
+  const r = game.play(move);
+  busy = false;
+
+  const line = lineAt(game, move, r, ENGINE);
+  if (line) return finish('engine', line, [move, r]);
+  if (game.full()) return finish('draw', [], [move, r]);
+
+  render([move, r]);
+  setStatus(`Engine played column ${move + 1}. Your move.`, '');
+}
+
+function finish(result, line, animateCell) {
+  over = { result, line };
+  busy = false;
+  render(animateCell);
+  if (result === 'human') setStatus('You win.', 'over');
+  if (result === 'engine') setStatus('Engine wins.', 'over');
+  if (result === 'draw') setStatus('Draw, board is full.', 'over');
+}
+
+function newGame() {
+  game.reset();
+  over = null;
+  busy = false;
+  lastScores = null;
+  lastEval = 0;
+  el('tDepth').textContent = '—';
+  el('tNodes').textContent = '—';
+  el('tTime').textContent = '—';
+  el('tNps').textContent = '—';
+
+  if (engineFirst) {
+    game.turn = ENGINE;
+    busy = true;
+    render();
+    setStatus('Engine is thinking...', 'bot think');
+    requestAnimationFrame(() => setTimeout(engineMove, 30));
+  } else {
+    game.turn = HUMAN;
+    render();
+    setStatus('Your move. Drop a disc.', '');
+  }
+}
+
+el('newGame').addEventListener('click', newGame);
+
+el('undo').addEventListener('click', () => {
+  if (busy || game.moves.length === 0) return;
+  game.undo();
+  if (game.turn !== HUMAN && game.moves.length) game.undo();
+  over = null;
+  lastScores = null;
+  lastEval = 0;
+  render();
+  setStatus('Taken back. Your move.', '');
+});
+
+el('swap').addEventListener('click', () => {
+  engineFirst = !engineFirst;
+  el('swap').textContent = engineFirst ? 'You start' : 'Engine starts';
+  newGame();
+});
+
+document.addEventListener('keydown', e => {
+  const n = parseInt(e.key, 10);
+  if (n >= 1 && n <= 7) tryDrop(n - 1);
+});
+
+newGame();
+</script>
+</body>
+</html>
