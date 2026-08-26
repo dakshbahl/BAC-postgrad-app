@@ -44,7 +44,7 @@ The 69 windows are precomputed once at load.
 
 ## Dataset
 
-`calibrate_eval.py` uses the Kaggle Connect-4 dataset to check the eval weights. The dataset is 67,557 positions at 8 plies labelled with the result under perfect play, which is ground truth for whether the heuristic is right when it says a position is good.
+`calibrate_eval.py` uses the Kaggle Connect-4 dataset to check the eval weights. 
 
 It pulls out the same seven quantities the eval reacts to, so a fitted logistic regression's coefficients land in the same units as the hardcoded numbers and can be compared directly. It reports sign agreement for both sets of weights and prints a replacement block.
 
