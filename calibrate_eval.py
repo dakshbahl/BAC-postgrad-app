@@ -1,5 +1,4 @@
 import argparse
-import gzip
 import sys
 from pathlib import Path
 
@@ -21,6 +20,10 @@ HAND_WEIGHTS = {
 }
 FEATURES = list(HAND_WEIGHTS)
 
+# The CSV stores cells row-major with row 0 at the top. engine.js indexes
+# col * ROWS + row with row 0 at the bottom. This maps one onto the other.
+REINDEX = np.array([(i % COLS) * ROWS + (ROWS - 1 - i // COLS) for i in range(42)])
+
 
 def build_windows():
     out = []
@@ -37,23 +40,25 @@ WINDOWS = build_windows()
 
 
 def load(path):
-    opener = gzip.open if str(path).endswith(".gz") else open
-    code = {"x": 1, "o": -1, "b": 0}
-    result = {"win": 1, "loss": -1, "draw": 0}
-    boards, labels = [], []
+    """Read c4_game_database.csv: 42 cell columns, then a winner column."""
+    rows = np.genfromtxt(path, delimiter=",", skip_header=1, dtype=np.float32)
+    rows = rows[~np.isnan(rows).any(axis=1)]
 
-    with opener(path, "rt") as fh:
-        for line in fh:
-            parts = line.strip().split(",")
-            if len(parts) != 43:
-                continue
-            try:
-                boards.append([code[p] for p in parts[:42]])
-                labels.append(result[parts[42]])
-            except KeyError:
-                continue
+    raw = rows[:, :42].astype(np.int8)
+    labels = rows[:, 42].astype(np.int8)
 
-    return np.array(boards, dtype=np.int8), np.array(labels, dtype=np.int8)
+    boards = np.zeros_like(raw)
+    boards[:, REINDEX] = raw
+    return boards, labels
+
+
+def check_gravity(boards, sample=2000):
+    """Every disc rests on the floor or another disc. Catches a wrong layout."""
+    grid = boards[:sample].reshape(-1, COLS, ROWS)
+    filled = grid != 0
+    heights = filled.sum(axis=2)
+    expected = np.arange(ROWS)[None, None, :] < heights[:, :, None]
+    return float((filled == expected).all(axis=(1, 2)).mean())
 
 
 def featurise(boards):
@@ -78,39 +83,54 @@ def handcrafted_score(feats):
 def agreement(name, scores, labels):
     decisive = labels != 0
     rate = (np.sign(scores[decisive]) == labels[decisive]).mean()
-    print(f"  {name:<20} {rate:6.1%} on {decisive.sum():,} decisive positions")
+    print(f"  {name:<22} {rate:6.1%} on {decisive.sum():,} decisive positions")
     return rate
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default="connect-4.data")
+    ap.add_argument("--data", default="c4_game_database.csv")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
     path = Path(args.data)
     if not path.exists():
         print(f"Could not find {path}")
-        print("Download the Connect-4 dataset, decompress it, and pass it with --data")
+        print("Download the Kaggle Connect 4 game database and pass it with --data")
         sys.exit(1)
 
     boards, labels = load(path)
+
+    legal = check_gravity(boards)
+    if legal < 0.99:
+        print(f"Only {legal:.1%} of boards are physically legal after reindexing.")
+        print("The cell ordering assumed by REINDEX is wrong for this file.")
+        sys.exit(1)
+
+    discs = (boards != 0).sum(axis=1)
     print(f"\n{len(boards):,} positions "
-          f"(win {(labels == 1).mean():.1%}, "
-          f"loss {(labels == -1).mean():.1%}, "
+          f"(p1 {(labels == 1).mean():.1%}, "
+          f"p2 {(labels == -1).mean():.1%}, "
           f"draw {(labels == 0).mean():.1%})")
+    print(f"{discs.min()}-{discs.max()} discs per position, mean {discs.mean():.1f}")
 
     X = featurise(boards)
-    Xtr, Xte, ytr, yte = train_test_split(
-        X, labels, test_size=0.25, random_state=args.seed, stratify=labels)
+    Xtr, Xte, ytr, yte, _, dte = train_test_split(
+        X, labels, discs, test_size=0.25, random_state=args.seed, stratify=labels)
 
-    print("\nsign agreement with the true result")
-    agreement("hand-tuned", handcrafted_score(Xte), yte)
+    dec_te = yte != 0
+    print("\nsign agreement with the game result")
+    majority = max((yte[dec_te] == 1).mean(), (yte[dec_te] == -1).mean())
+    print(f"  {'always-guess-majority':<22} {majority:6.1%} baseline")
+
+    hand = handcrafted_score(Xte)
+    agreement("hand-tuned", hand, yte)
 
     dec = ytr != 0
     scaler = StandardScaler().fit(Xtr[dec])
     model = LogisticRegression(max_iter=2000).fit(scaler.transform(Xtr[dec]), ytr[dec])
-    agreement("refitted", model.decision_function(scaler.transform(Xte)), yte)
+    fitted = model.decision_function(scaler.transform(Xte))
+    agreement("refitted", fitted, yte)
 
     raw = model.coef_[0] / scaler.scale_
     raw = raw / np.abs(raw).max() * 75.0
@@ -119,6 +139,16 @@ def main():
     print(f"  {'feature':<14}{'hand':>8}{'refitted':>11}")
     for name, value in zip(FEATURES, raw):
         print(f"  {name:<14}{HAND_WEIGHTS[name]:>8.0f}{value:>11.1f}")
+
+    print("\nagreement by game stage")
+    print(f"  {'discs':<10}{'n':>9}{'hand':>9}{'refitted':>11}")
+    for lo, hi in ((7, 14), (15, 21), (22, 28), (29, 35), (36, 42)):
+        m = (dte >= lo) & (dte <= hi) & dec_te
+        if m.sum() < 50:
+            continue
+        h = (np.sign(hand[m]) == yte[m]).mean()
+        f = (np.sign(fitted[m]) == yte[m]).mean()
+        print(f"  {f'{lo}-{hi}':<10}{m.sum():>9,}{h:>9.1%}{f:>11.1%}")
 
     m3, m2, m1, t3, t2, t1, centre = raw
     print("\nreplacement block for evaluate() in engine.js")
